@@ -1,0 +1,133 @@
+---
+title: "Statistical Analysis OES Paper"
+author: "Amy Hatton"
+date: "15/04/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#libraries
+library(dplyr)
+library(janitor)
+```
+
+# Chi- squared test to compare levels of burning between OES frags and beads
+
+## Read in OES data
+```{r}
+oesbead_data <- read.csv("../../GHN OES/ghn_oesbeads.csv")
+oes_data <- read.csv("../../GHN OES/ghn_oes_strats.csv")
+```
+Filter out the DBGS points
+```{r}
+# filter out only the DBGS finds
+oes_beads_dbgs <- oesbead_data %>% 
+  filter(Strat.Agg == "DBGS") %>% 
+  clean_names() %>% 
+  mutate(colour = color) 
+oes_dbgs <- oes_data %>% 
+  filter(Strat.Agg == "DBGS")%>% 
+  clean_names()
+
+range(oes_dbgs$length_mm)
+sd(oes_dbgs$length_mm)
+
+range(oes_dbgs$width_mm)
+sd(oes_dbgs$width_mm)
+
+range(oes_dbgs$weight_g)
+sd(oes_dbgs$weight_g)
+diam_1 <- oes_beads_dbgs %>% 
+  filter(bead_or_preform == "bead") 
+sd(diam_1$max_ext_di)
+sd(diam_1$max_aper_di)
+sd(oes_beads_dbgs$max_thick)
+```
+
+Combine OES frags and OES beads as one df
+```{r}
+oes_beads_dbgs <- oes_beads_dbgs %>% 
+  mutate(type = "bead_or_preform") %>% 
+  dplyr::select(lot, find, type, colour)
+  
+oes_dbgs <- oes_dbgs %>% 
+  mutate(type = "fragment")%>% 
+  dplyr::select(lot, find, type, colour)
+
+#combine the two into 1 df
+dbgs_oes <- rbind(oes_beads_dbgs,oes_dbgs)
+```
+
+Check that the levels for colour are clean
+```{r}
+dbgs_oes$colour <- as.factor(dbgs_oes$colour)
+levels(dbgs_oes$colour)
+
+#need to subsume brown into unburnt (brown is just staining from sediment)
+levels(dbgs_oes$colour) <- c("black"  , "unburnt"  , "red"   ,  "unburnt" ,"yellow" )
+```
+
+Create contigency table
+```{r}
+library(MASS)       # load the MASS package 
+tbl <- table(dbgs_oes$colour, dbgs_oes$type)
+```
+Run chi-sqaured test
+```{r}
+chisq.test(tbl)
+```
+# Anova for oes bead mena diameter
+Read in the data
+```{r}
+sa_beads <- read.csv("../../General Data southern africa/SouthernAfricanOESBeadData_revised.csv")
+
+sa_beads <- clean_names(sa_beads)
+```
+Process the data
+```{r}
+#group by site
+bead_diam <- sa_beads %>% 
+  dplyr::select(site, site_abb,mean_diameter_mm) %>% 
+  filter(!is.na(mean_diameter_mm)) %>% 
+  group_by(site) 
+
+```
+Conduct anova test
+```{r}
+# Compute the analysis of variance
+res.aov <- aov(mean_diameter_mm ~ site, data = bead_diam)
+# Summary of the analysis
+summary(res.aov)
+plot(res.aov)
+
+#Tukey pairwise comparisons
+TukeyHSD(res.aov)
+```
+# check which sites have more than 50 beads
+```{r}
+ba <- sa_beads %>% 
+  filter(bead_total > 50)
+
+range(ba$bead_total)
+```
+
+
+Make a scatterplot of the bead diameter data
+```{r}
+plot(sa_beads$mean_diameter_mm)
+library(ggplot2)
+
+
+ggplot(bead_diam, aes(colour = site_abb))+
+  geom_point(aes(mean_diameter_mm, site_abb), pch = 21, size= 3)+
+  coord_flip()+
+  theme_bw()+
+  xlab("Mean Bead Diameter") + ylab("Site")+
+  theme(legend.position = "none") 
+
+ggsave("Plots/bead_diam_scatter.png")
+  
+```
+
