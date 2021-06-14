@@ -1,11 +1,18 @@
 ---
 title: "Southern African Regional OES MIS2"
 author: "Amy Hatton"
-date: "16/02/2021"
-output: html_document
+date: "14/06/2021"
+output: pdf_document
+fontsize: 12pt
+mainfont: Calibri
 ---
+# Ostrich eggshell beads from Ga-Mohana Hill North Rockshelter, southern Kalahari, and the implications for understanding social networks during Marine Isotope Stage 2
 
-#Install Packages 
+Authors: Amy Hatton, Benjamin Collins, Benjamin J. Schoville, Jayne Wilkins
+
+## Code for making the maps in this paper
+
+Install Packages 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(sf)
@@ -20,26 +27,27 @@ library(tidyverse)
 library(janitor)
 ```
 
-# Read in the csv and convert to a spatial object
+Read in the csv and convert to a spatial object
 ```{r}
-sa_beads <- read.csv("../../General Data southern africa/SouthernAfricanOESBeadData_revised.csv")
+sa_beads <- read.csv("../data/sa_oes_bead_table.csv")
 
-
-#convert to sf object
-sa_beads_sf <- st_as_sf(sa_beads, coords = c("Long","Lat" ),
+#convert to sf (spatial) object
+sa_beads_sf <- st_as_sf(sa_beads, coords = c("long","lat" ),
                      crs = 4326)
-#st_write(sa_beads_sf,"nok_spatial_data/sa_beads_mis2.gpkg", append = FALSE)
-#summary(sa_beads)
 ```
 
 Get the distances between a few of the sites for the text 
 ```{r}
+#distance between Dikbosch and GHN
 st_distance(sa_beads_sf[23,], sa_beads_sf[25,])
+
+#distance between BRS and HNK
+st_distance(sa_beads_sf[12,], sa_beads_sf[29,])
 ```
 ## Prep the Data for plotting the pie charts (preforms vs finished beads)
 ```{r}
 sa_beads <- clean_names(sa_beads)
-names(sa_beads)
+#names(sa_beads)
 
 sa_beads$beads_finished <- as.numeric(sa_beads$beads_finished)
 sa_beads$beads_preforms <- as.numeric(sa_beads$beads_preforms)
@@ -62,30 +70,66 @@ beads_mis2 <- sa_beads %>%
          fin_vs_oes_prop = beads_finished/oes_total, oes_prop = (beads_preforms + oes_fragments)/oes_total) 
 ```
 
+### 1) Plot a Raster of southern africa as base plot to plot the pie charts on top of. 
 
-
-# 1) Plot a Raster of southern africa as base plot to plot the pie charts on top of. 
-
-## Import the raster
-
-Use the stars package - allows you to downsample when plotting - code runs much faster!
+Import the raster - this is a 90m resolution dem from Open Topograpgy that has been downsampled in R by a factor of 8. 
+The raster file is too large to use otherwise and this resolution is fin enough for plotting.
 
 ```{r}
-sa_dem <- raster("nok_spatial_data/sa_dem_srtm90.tif")
-sa_borders <- st_read("nok_spatial_data/southern_africa_borders.gpkg")
-sa_borders <- st_transform(sa_borders, 4326)
-#st_write(sa_borders, "nok_spatial_data/southern_africa_borders_epsg4326.gpkg")
-
-#create bounding box for sa_borders
-library(rgeos)
-
-extent(sa_borders)
-my_box <- rgeos::bbox2SP(n = -16.95106 , s = -34.82195 , w = 11.71762, e = 32.89308,
-                         proj4string = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"))
-my_box <- st_as_sf(my_box, 4326)
+#import raster
+sa_dem <- raster("../data/sa_dem_downsampled.tif")
+#imposrt hillshade
+hs <- raster("../data/sa_dem_hs.tif")
 ```
 
+### 2) Read in and process the ostrich species distribution data.
 
+This is data from the South African Bird Atlas Project 2 (SABAP2) acessed at (http://sabap2.birdmap.africa/)
+
+```{r, message=FALSE}
+oes_dist <- st_read("../data/ostrich_distribution.gpkg")
+```
+Rasterise the OES data
+```{r, message=FALSE}
+ext <- extent(oes_dist)
+r <- raster(ext, res=c(1/12,1/12))  #resolution of SABAP2 is 1/9 (1/3 x 1/3) of a quarter degree lat long square
+r <- rasterize(oes_dist, r, field="full.protocol")
+```
+
+Interpolate the OES distribution data using ordinary kriging
+```{r, message=FALSE}
+library(gstat)
+library(automap)
+
+#convert ostrich raster to points
+p <- rasterToPoints(r, spatial = TRUE)
+
+#interpolate 
+pred <- autoKrige(layer~1, p)
+oes_pred <- pred$krige_output
+```
+
+Rasterise the interpolated oes data
+```{r}
+#rasterise prediction
+r1 <- raster(oes_pred)
+#create raster with extent of the sa dem file
+ext <- extent(sa_dem)
+#ext <- extent(11.6,33, -34.2, -16.8)
+r1 <- extend(r1, ext, value = NA)
+```
+
+Make the resolution of the oes distribution data finer to allow for plotting
+the coarser resolution makes a very pixelated map. This is alright because we just want a vague idea of the ostich distribution.
+```{r}
+#make the resolution finer to allow for nice plotting (not good for analysis but fine for visualising)
+r1_agg <- disaggregate(r1, fact=25)
+
+#set the coordinate ref system
+crs(r1_agg) <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs" 
+```
+
+Get the country borders for all southern african countries from Natural Earth
 ```{r}
 #get the polygons for other countries (zambia etc)
 library(rnaturalearth)
@@ -97,141 +141,41 @@ s1 <- s %>%
            name == "Lesotho")
 s1 <- st_transform(s1, 4326)
 
+library(rgeos)
+my_box <- rgeos::bbox2SP(n = -16.95106 , s = -34.82195 , w = 11.71762, e = 32.89308,
+                         proj4string = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"))
+my_box <- st_as_sf(my_box, 4326)
+
 #get the intersection of the sa bbox and this 
 a_borders <- st_intersection(my_box, s1)
-#st_write(a_borders, "nok_spatial_data/oes_paper_sa_map/a_borders.gpkg", append =FALSE)
-
-#downsample the raster (make the resolution more coarse)
-sa_dem_agg <- aggregate(sa_dem, fact=8)
-
-#clip the dem to borders
-dem_clip <- mask(sa_dem_agg, a_borders)
-
-#create hillshade for plotting
-#slope <- terrain(dem_clip,opt = "slope",unit = "radians" )
-#aspect <- terrain(dem_clip, opt="aspect", unit = "radians")
-#hs <- hillShade(slope, aspect, angle = 35)
-hs <- raster("nok_spatial_data/oes_paper_sa_map/sa_hs.tif")
-#remove aspect and slope
-rm(aspect)
-rm(slope)
-rm(sa_dem_agg)
 ```
 
-## Read in ostrich species distribution data from SABAP2 (http://sabap2.birdmap.africa/)
-
-```{r}
-
-oes_dist <- st_read("nok_spatial_data/SABAP2_ostrich_distribution.gpkg")
-```
-### Rasterise the OES data
-```{r}
-ext <- extent(oes_dist)
-r <- raster(ext, res=c(1/12,1/12))  #resolution of SABAP2 is 1/9 (1/3 x 1/3) of a quarter degree lat long square
-r <- rasterize(oes_dist, r, field="full.protocol")
-```
-
-
-### Interpolate the OES distribution data using ordinary kriging
-```{r}
-library(gstat)
-library(automap)
-
-#convert ostrich raster to points
-p <- rasterToPoints(r, spatial = TRUE)
-#p1 <- as(p, "SpatialPointsDataFrame")
-
-pred <- autoKrige(layer~1, p)
-oes_pred <- pred$krige_output
-```
-
-
-```{r}
-#rasterise prediction
-r1 <- raster(oes_pred)
-#create raster with extent that I want 
-ext <- extent(11.6,33, -34.2, -16.8)
-r1 <- extend(r1, ext, value = NA)
-
-```
-
-# expand the edges of raster to fill the whole of southern africa (was stopping short of some borders)
-```{r}
-#calculate distance from all cells with values to all NA cells
-dist <- distance(r1)  
-# you can also set a maximum distance: dist[dist > maxdist] <- NA
-dist[dist > 3] <- NA
-plot(dist)
-
-direct <- direction(r1, from=FALSE)
-```
-Retrieve the coordinates of nearest non - NA cells
-```{r}
-# NA raster
-rna <- is.na(r1) # returns NA raster
-
-# store coordinates in new raster 
-na.x <- init(rna, 'x')
-na.y <- init(rna, 'y')
-
-# calculate coordinates of the nearest Non-NA pixel
-# assume that we have a orthogonal, projected CRS, so we can use (Pythagorean) calculations
-co.x <- na.x + dist * sin(direct)
-co.y <- na.y + dist * cos(direct)
-
-# matrix with point coordinates of nearest non-NA pixel
-co <- cbind(co.x[], co.y[]) 
-```
-
-```{r}
-# extract values of nearest non-NA cell with coordinates co
-NAVals <- raster::extract(r1, co, method='simple') 
-r.NAVals <- rna # initiate new raster
-r.NAVals[] <- NAVals # store values in raster
-```
-```{r}
-# cover nearest non-NA value at NA locations of original raster
-r.filled <- cover(x=r1, y= r.NAVals)
-```
-
-```{r}
-#make the resolution finer to allow for nice plotting (not good for analysis but fine for visualising)
-r1_agg <- disaggregate(r.filled, fact=25)
-
-crs(r1_agg) <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs" 
-writeRaster(r1_agg, "nok_spatial_data/oes_paper_sa_map/oes_pred_rast.tiff", overwrite=TRUE)
-
-crs(r1_agg)
-```
+Crop the ostrich distribution data to the country borders
 
 ```{r}
 #crop to southern africa 
 r2 <- mask(r1_agg, a_borders)
 oes_pred_sa <- crop(r2, a_borders)
-plot(oes_pred_sa)
 
-extent(oes_pred_sa)
-st_bbox(a_borders)
-writeRaster(oes_pred_sa, "nok_spatial_data/oes_paper_sa_map/ostrich_pred.tif", overwrite = TRUE)
-st_write(a_borders, "nok_spatial_data/oes_paper_sa_map/a_borders.gpkg", append = FALSE)
-writeRaster(dem_clip, "nok_spatial_data/oes_paper_sa_map/sa_dem.tif", overwrite = TRUE)
-crs(r1_agg)
 #make stars object
 oes_pred_stars <- st_as_stars(oes_pred_sa)
 ```
-
 
 Convert the clipped dem to a df for plotting with ggplot
 ```{r}
 # convert to a df for plotting in two steps,
 # First, to a SpatialPointsDataFrame
-dem_pts <- rasterToPoints(dem_clip, spatial = TRUE)
+dem_pts <- rasterToPoints(sa_dem, spatial = TRUE)
 # Then to a 'conventional' dataframe
 dem_df  <- data.frame(dem_pts)
-#rm(dem_pts, dem_clip)
+#rm(dem_pts, sa_dem)
 ```
 
-### Pretty map code
+### Make the maps
+
+Now that we've prepped all of the data layers for the maps we can make them
+
+#### Base maps
 ```{r}
 library(ggplot2) # For map design
 library(ggspatial) # For map design
@@ -240,11 +184,12 @@ library(patchwork) # For multiple map layout
 library(raster) # For manage raster data
 library(sf) # For manage vector data
 
-
+#set up a colour palette
 pal <- rev(RColorBrewer::brewer.pal(8, "RdYlBu"))
 pal1 <- rev(c("#d7191c", "#fdae61", "#ffffbf", "#abdda4", "#2b83ba"))
 pal2 <- (RColorBrewer::brewer.pal(5, "BrBG"))
 pal3 <- c("#defae1", "#addbb2", "#67b5a5", "#2986ab", "#2c5f96")
+
 #convert to a stars object
 hs_stars <- st_as_stars(hs)
 
@@ -281,9 +226,7 @@ p3 <- p2 +
     geom_sf(data = a_borders, size =1.2, colour = "white", fill = NA)
 ```
 
-# add the last layer (actual data) to each of the 4 maps
-
-Map with sites and pie charts for preform/bead ratio
+#### Map with sites and pie charts for preform/bead ratio
 ```{r}
 #add the pie charts at sites for proportion beads to preforms
 
@@ -309,20 +252,12 @@ map1 <- p3+
   theme(legend.position = "bottom")
 
 
-## attempt 2 adjust lat and long to avoid overlapping - has to be done manually? can't find a function that works
-
-#I want to move RCC, HM and NT because they are all bunched together 
-#RCC is the 10th row, NT is the 9th row, HM is the 5th row
-
-pdf("Plots/map1_mis2.pdf")
+pdf("../plots/fig3.pdf")
 print(map1)
 dev.off()
 
 ```
-
-
-Map with frequencies of bead vs preforms +frags
-
+#### Map with frequencies of bead vs preforms +frags
 
 ```{r}
 #filte out na's
@@ -338,13 +273,12 @@ map2 <- p3+
   geom_text_repel(data = bead_vs_oes, aes(x=long_geom, y=lat_geom, label=site_abb), point.padding =2, box.padding = 0.5)+
   theme(legend.position = "bottom")
 
-pdf("Plots/map2_mis2.pdf")
+pdf("../plots/fig4.pdf")
 print(map2)
 dev.off()
-
 ```
 
-Map with OES bead + preform abundance
+#### Map with OES bead + preform abundance
 ```{r}
 library(viridis)
 
@@ -362,12 +296,11 @@ map3 <- p3 +
   guides(fill=guide_legend("OES bead and preform\nabundance"),
          size=guide_legend("OES bead and preform\nabundance"))
   
-pdf("Plots/map3_mis2.pdf")
+pdf("../plots/fig5.pdf")
 print(map3)
 dev.off()
-
 ```
-Map with OES abundance (circles with diameter showing number of oes)
+#### Map with OES abundance (circles with diameter showing number of oes)
 ```{r}
 oes_count <- beads_mis2 %>%  
   filter_at(vars(oes_total), any_vars(!is.na(.)))
@@ -382,11 +315,11 @@ map4 <- p3 +
   guides(fill=guide_legend("OES Fragment\nAbundance"),
          size=guide_legend("OES Fragment\nAbundance"))
   
-pdf("Plots/map4_mis2.pdf")
+pdf("../plots/fig6.pdf")
 print(map4)
 dev.off()
 ```
-Map with diameter of beads
+#### Map with diameter of beads
 ```{r}
 bead_diam <- bead_data %>%  
   filter_at(vars(diameter), any_vars(!is.na(.)))
@@ -401,7 +334,7 @@ map5 <- p3 +
   guides(fill=guide_legend("Bead diameter"),
          size=guide_legend("Bead diameter"))
   
-pdf("Plots/map5_mis2.pdf")
+pdf("../plots/fig7.pdf")
 print(map5)
 dev.off()
 ```
