@@ -1,7 +1,7 @@
 ---
 title: "Statistical Analysis OES Paper"
 author: "Amy Hatton"
-date: "15/04/2021"
+date: "29/06/2021"
 output: pdf_document
 fontsize: 12pt
 mainfont: Calibri
@@ -21,7 +21,7 @@ library(janitor)
 
 ### Chi-squared test to compare levels of burning between OES frags and beads
 
-### Read in OES data and process
+Read in OES data and process
 ```{r}
 oesbead_data <- read.csv("../data/ghn_oesbeads.csv")
 oes_data <- read.csv("../data/ghn_oes.csv")
@@ -88,7 +88,7 @@ Run chi-sqaured test
 ```{r}
 chisq.test(tbl)
 ```
-### Anova for oes bead mena diameter
+### Anova for oes bead mean diameter
 
 Read in the data
 ```{r}
@@ -102,7 +102,16 @@ Process the data
 bead_diam <- sa_beads %>% 
   dplyr::select(site, site_abb,mean_diameter_mm) %>% 
   filter(!is.na(mean_diameter_mm)) %>% 
-  group_by(site) 
+  group_by(site) %>% 
+  mutate(diameter = mean(mean_diameter_mm)) 
+
+bead_diam_mean <- sa_beads %>% 
+  dplyr::select(site, site_abb,mean_diameter_mm) %>% 
+  filter(!is.na(mean_diameter_mm)) %>% 
+  group_by(site) %>% 
+  mutate(diameter = mean(mean_diameter_mm)) %>% 
+  dplyr::select(!mean_diameter_mm) %>% 
+  distinct()
 
 ```
 Conduct anova test
@@ -111,7 +120,7 @@ Conduct anova test
 res.aov <- aov(mean_diameter_mm ~ site, data = bead_diam)
 # Summary of the analysis
 summary(res.aov)
-plot(res.aov)
+#plot(res.aov)
 
 #Tukey pairwise comparisons
 TukeyHSD(res.aov)
@@ -122,9 +131,38 @@ ba <- sa_beads %>%
   mutate(bead_total = beads_finished + beads_preforms ) %>% 
   filter(bead_total > 50)
 
-
 range(ba$bead_total)
 ```
+### Spearman rank order correlation
+
+Run Spearman rank order correlation on ostrich prevalence and bead size
+```{r}
+library(raster)
+library(sf)
+# read in oes distribution raster
+oes_dist <- raster("../data/ostrich_distribution.tif")
+
+sa_beads_sf <- st_as_sf(sa_beads, coords = c("long","lat" ),
+                     crs = 4326)
+
+
+bead_diam_sf <-  sa_beads_sf %>% 
+  dplyr::select(site, site_abb,mean_diameter_mm) %>% 
+  filter(!is.na(mean_diameter_mm)) %>% 
+  group_by(site) %>% 
+  mutate(diameter = mean(mean_diameter_mm)) %>% 
+  dplyr::select(!mean_diameter_mm) %>% 
+  distinct(.keep_all=TRUE)
+
+#get the raster values (ostrich prevalence) for a 5km area around each site
+
+ras_value <- raster::extract(oes_dist, bead_diam_sf, buffer= 5000, fun=mean)
+
+ras_value1 <- raster::extract(oes_dist, sa_beads_sf, buffer= 5000, fun=mean)
+
+val_points <- cbind(bead_diam_sf, ras_value)
+```
+
 
 
 
