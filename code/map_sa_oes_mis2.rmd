@@ -1,7 +1,7 @@
 ---
 title: "Southern African Regional OES MIS2"
 author: "Amy Hatton"
-date: "14/06/2021"
+date: "29/06/2021"
 output: pdf_document
 fontsize: 12pt
 mainfont: Calibri
@@ -47,7 +47,6 @@ st_distance(sa_beads_sf[12,], sa_beads_sf[29,])
 ## Prep the Data for plotting the pie charts (preforms vs finished beads)
 ```{r}
 sa_beads <- clean_names(sa_beads)
-#names(sa_beads)
 
 sa_beads$beads_finished <- as.numeric(sa_beads$beads_finished)
 sa_beads$beads_preforms <- as.numeric(sa_beads$beads_preforms)
@@ -58,11 +57,11 @@ beads_mis2 <- sa_beads %>%
   mutate(oes_total = beads_finished + beads_preforms + oes_fragments,
          bead_total = beads_finished + beads_preforms) %>% 
   group_by(site_abb) %>% 
-  summarise(beads_finished = mean(beads_finished),
-            beads_preforms = mean(beads_preforms),
-            oes_fragments = mean(oes_fragments),
-            bead_total = mean(bead_total),
-            oes_total = mean(oes_total),
+  summarise(beads_finished = sum(beads_finished),
+            beads_preforms = sum(beads_preforms),
+            oes_fragments = sum(oes_fragments),
+            bead_total = sum(bead_total),
+            oes_total = sum(oes_total),
             diameter = mean(mean_diameter_mm),
             long = mean(long),
             lat = mean(lat)) %>% 
@@ -78,8 +77,8 @@ The raster file is too large to use otherwise and this resolution is fin enough 
 ```{r}
 #import raster
 sa_dem <- raster("../data/sa_dem_downsampled.tif")
-#imposrt hillshade
-hs <- raster("../data/sa_dem_hs.tif")
+#import hillshade
+hs <- raster("../data/sa_hs.tif")
 ```
 
 ### 2) Read in and process the ostrich species distribution data.
@@ -123,10 +122,13 @@ Make the resolution of the oes distribution data finer to allow for plotting
 the coarser resolution makes a very pixelated map. This is alright because we just want a vague idea of the ostich distribution.
 ```{r}
 #make the resolution finer to allow for nice plotting (not good for analysis but fine for visualising)
-r1_agg <- disaggregate(r1, fact=25)
+r1_agg <- disaggregate(r1, fact=50)
 
 #set the coordinate ref system
 crs(r1_agg) <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs" 
+
+#write the ostrich distribution raster
+writeRaster(r1_agg, "../data/ostrich_distribution.tif", overwrite=TRUE)
 ```
 
 Get the country borders for all southern african countries from Natural Earth
@@ -152,7 +154,7 @@ a_borders <- st_intersection(my_box, s1)
 
 Crop the ostrich distribution data to the country borders
 
-```{r}
+```{r, message=FALSE}
 #crop to southern africa 
 r2 <- mask(r1_agg, a_borders)
 oes_pred_sa <- crop(r2, a_borders)
@@ -183,6 +185,7 @@ library(ggrepel)  # For map design
 library(patchwork) # For multiple map layout
 library(raster) # For manage raster data
 library(sf) # For manage vector data
+library(ggnewscale)
 
 #set up a colour palette
 pal <- rev(RColorBrewer::brewer.pal(8, "RdYlBu"))
@@ -193,29 +196,23 @@ pal3 <- c("#defae1", "#addbb2", "#67b5a5", "#2986ab", "#2c5f96")
 #convert to a stars object
 hs_stars <- st_as_stars(hs)
 
+
 #### Working plot
 hillshade <- ggplot() + 
-   geom_stars(data =hs_stars, downsample = 5, show.legend = FALSE) +
+   geom_stars(data =hs_stars, downsample = 5, show.legend = FALSE, alpha = 0.4)+
    scale_fill_continuous( low = "black", high = "white",
                           na.value = "white")+
-  coord_equal()+
    theme_bw() +
+  coord_equal()+
     scale_x_continuous(expand=c(0,0))+
     scale_y_continuous(expand=c(0,0))
 
-#layer 2 - elevation data
-dem_map <- ggplot()+
-  geom_raster(data=dem_df, aes(x = x, y= y, fill = sa_dem_srtm90))+
-  scale_fill_gradientn( colours=c("grey24","white"))+
-  coord_equal()+
-   theme_bw() +
-    scale_x_discrete(expand=c(0,0))+
-    scale_y_discrete(expand=c(0,0))
-library(ggnewscale)
+
+
 #layer 3 - ostrich distribution
 p2 <- hillshade +
   new_scale("fill")+
-  geom_stars(data = oes_pred_stars, alpha = 0.8) +
+  geom_stars(data = oes_pred_stars, alpha = 0.6) +
   scale_fill_gradientn(colours = pal3, limits = c(0, 100), na.value = "white") +
   labs(x = "Longitude", y = "Latitude", fill = "Modern Prevalence \nof Ostriches") +
   theme_bw()
@@ -224,6 +221,7 @@ p2 <- hillshade +
 #add the country borders
 p3 <- p2 +
     geom_sf(data = a_borders, size =1.2, colour = "white", fill = NA)
+
 ```
 
 #### Map with sites and pie charts for preform/bead ratio
@@ -260,7 +258,7 @@ dev.off()
 #### Map with frequencies of bead vs preforms +frags
 
 ```{r}
-#filte out na's
+#filter out na's
 bead_vs_oes <- beads_mis2 %>%  
   filter_at(vars(fin_vs_oes_prop, oes_prop), any_vars(!is.na(.)))
 
